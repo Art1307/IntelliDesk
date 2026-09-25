@@ -22,3 +22,8 @@ htmlcov/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Secrets & local credentials
+intellidesk.txt
+*.key
+*.pem
