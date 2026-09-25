@@ -1,0 +1,10 @@
+Artificial intelligence is the simulation of human intelligence by machines.
+Document understanding involves extracting meaningful information and insights from structured or unstructured text.
+Retrieval-Augmented Generation, commonly known as RAG, combines information retrieval with text generation.
+The retrieval component searches a document index using TF-IDF and cosine similarity to find relevant chunks.
+The Transformer is a deep learning architecture that relies on self-attention mechanisms to process sequential data.
+In a decoder-only Transformer, causal masking prevents tokens from attending to future positions during text generation.
+Multi-head attention allows the model to jointly attend to information from different representation subspaces.
+Residual connections and layer normalization help stabilize and accelerate the training of deep neural networks.
+The language model head projects the contextualized embeddings onto vocabulary logits to predict the next token.
+Offline document assistants operate locally without requiring cloud APIs or internet connectivity, ensuring data privacy.
