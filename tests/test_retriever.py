@@ -43,7 +43,11 @@ def test_retriever_from_training_file():
     assert training_file.exists()
 
     retriever = DocumentRetriever.from_file(training_file)
-    assert len(retriever.documents) == 10
+    expected_count = sum(
+        1 for line in training_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
+    assert len(retriever.documents) == expected_count
 
     # Query for causal masking
     results = retriever.retrieve("causal masking decoder", top_k=1)

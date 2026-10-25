@@ -1,0 +1,47 @@
+[
+  {
+    "id": "retrieval_01",
+    "question": "How does causal masking work in a decoder?",
+    "expected_passage_contains": "causal masking",
+    "answer_keywords": [
+      "causal",
+      "future"
+    ]
+  },
+  {
+    "id": "retrieval_02",
+    "question": "What is an offline document assistant?",
+    "expected_passage_contains": "Offline document assistants",
+    "answer_keywords": [
+      "offline",
+      "document"
+    ]
+  },
+  {
+    "id": "retrieval_03",
+    "question": "How does TF-IDF retrieve relevant documents?",
+    "expected_passage_contains": "TF-IDF",
+    "answer_keywords": [
+      "term",
+      "frequency"
+    ]
+  },
+  {
+    "id": "retrieval_04",
+    "question": "What is weight tying in a Transformer?",
+    "expected_passage_contains": "Weight tying",
+    "answer_keywords": [
+      "embedding",
+      "weights"
+    ]
+  },
+  {
+    "id": "retrieval_05",
+    "question": "Why is a local assistant privacy-friendly?",
+    "expected_passage_contains": "privacy",
+    "answer_keywords": [
+      "local",
+      "privacy"
+    ]
+  }
+]

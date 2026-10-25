@@ -2,6 +2,8 @@ import math
 import re
 from pathlib import Path
 
+from src.data.document_loader import load_documents
+
 
 class DocumentRetriever:
     """
@@ -30,6 +32,7 @@ class DocumentRetriever:
         self.idf: dict[str, float] = {}
         self.doc_vectors: list[dict[str, float]] = []
         self.doc_norms: list[float] = []
+        self.source_metadata: list[dict[str, object]] = []
 
         if documents:
             self.index_documents(documents)
@@ -38,16 +41,30 @@ class DocumentRetriever:
         """Convert text into normalized lowercase alphanumeric tokens."""
         return re.findall(r"\b[a-zA-Z0-9_-]+\b", text.lower())
 
-    def index_documents(self, documents: list[str]) -> None:
+    def index_documents(
+        self,
+        documents: list[str],
+        metadata: list[dict[str, object]] | None = None,
+    ) -> None:
         """
         Build TF-IDF inverted index from document passages.
 
         Args:
             documents: List of text passages or document chunks.
         """
-        self.documents = [doc.strip() for doc in documents if doc.strip()]
+        indexed_pairs = [
+            (doc.strip(), metadata[index] if metadata and index < len(metadata) else {})
+            for index, doc in enumerate(documents)
+            if doc.strip()
+        ]
+        self.documents = [doc for doc, _ in indexed_pairs]
+        self.source_metadata = [source for _, source in indexed_pairs]
         num_docs = len(self.documents)
         if num_docs == 0:
+            self.vocabulary = {}
+            self.idf = {}
+            self.doc_vectors = []
+            self.doc_norms = []
             return
 
         # 1. Tokenize all documents and track document frequencies (DF)
@@ -101,9 +118,64 @@ class DocumentRetriever:
     @classmethod
     def from_file(cls, filepath: str | Path) -> "DocumentRetriever":
         """Load text file, split into non-empty line chunks, and index."""
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = [line.strip() for line in f.readlines() if line.strip()]
-        return cls(documents=lines)
+        with open(filepath, "r", encoding="utf-8") as file:
+            lines_with_numbers = [
+                (line.strip(), line_number)
+                for line_number, line in enumerate(file, start=1)
+                if line.strip()
+            ]
+        instance = cls()
+        instance.index_documents(
+            [line for line, _ in lines_with_numbers],
+            metadata=[
+                {"source": str(Path(filepath).resolve()), "line_number": line_number}
+                for _, line_number in lines_with_numbers
+            ],
+        )
+        return instance
+
+    @classmethod
+    def from_paths(
+        cls,
+        paths: list[str | Path],
+        chunk_size: int = 700,
+        overlap: int = 100,
+    ) -> "DocumentRetriever":
+        """Load PDF/TXT files or directories, chunk them, and preserve source metadata."""
+        chunks = load_documents(paths, chunk_size=chunk_size, overlap=overlap)
+        instance = cls()
+        instance.index_documents(
+            [chunk.text for chunk in chunks],
+            metadata=[
+                {
+                    "source": chunk.source,
+                    "page_number": chunk.page_number,
+                    "line_number": chunk.line_number,
+                    "chunk_index": chunk.chunk_index,
+                }
+                for chunk in chunks
+            ],
+        )
+        return instance
+
+    def retrieve_with_metadata(
+        self, query: str, top_k: int = 2
+    ) -> list[dict[str, object]]:
+        """Retrieve passages along with scores and source/page/chunk metadata."""
+        ranked = self.retrieve(query, top_k=top_k)
+        results: list[dict[str, object]] = []
+        used_indices: set[int] = set()
+        for passage, score in ranked:
+            index = next(
+                (i for i, doc in enumerate(self.documents)
+                 if i not in used_indices and doc == passage),
+                None,
+            )
+            if index is not None:
+                used_indices.add(index)
+            metadata = self.source_metadata[index] if index is not None and index < len(self.source_metadata) else {}
+            results.append({"text": passage, "score": score, "metadata": metadata})
+        return results
 
     def retrieve(
         self, query: str, top_k: int = 2

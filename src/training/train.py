@@ -1,3 +1,4 @@
+import argparse
 import os
 from pathlib import Path
 import torch
@@ -5,6 +6,7 @@ from torch.utils.data import DataLoader
 from src.model.transformer import TransformerLM
 from src.data.tokenizer import Tokenizer
 from src.data.dataset import TextDataset, create_dataloader
+from src.data.document_loader import load_documents
 
 
 def configure_optimizers(
@@ -169,6 +171,27 @@ class Trainer:
         return checkpoint
 
 
+def load_training_text(data_path: str | Path) -> str:
+    """Read a TXT corpus or extract text from a PDF/directory of PDF and TXT files."""
+    source = Path(data_path).expanduser()
+    if not source.exists():
+        raise FileNotFoundError(f"Training input not found: {source}")
+
+    if source.is_dir() or source.suffix.lower() == ".pdf":
+        chunks = load_documents([source])
+        text = "\n".join(chunk.text for chunk in chunks)
+    elif source.suffix.lower() == ".txt":
+        text = source.read_text(encoding="utf-8-sig", errors="replace")
+    else:
+        raise ValueError(
+            f"Unsupported training input '{source}'. Provide a .txt file, .pdf file, or directory of PDF/TXT files."
+        )
+
+    if not text.strip():
+        raise ValueError(f"No training text could be extracted from {source}")
+    return text
+
+
 def run_training(
     data_path: str = "data/training.txt",
     output_dir: str = "checkpoints",
@@ -184,13 +207,15 @@ def run_training(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # 1. Train Tokenizer
-    tokenizer = Tokenizer.from_file(data_path)
+    # 1. Extract local text from the supplied TXT/PDF source(s), then build the tokenizer.
+    training_text = load_training_text(data_path)
+    (output_path / "training_corpus.txt").write_text(training_text, encoding="utf-8")
+    tokenizer = Tokenizer.from_text(training_text)
     tokenizer.save(output_path / "tokenizer.json")
 
-    # 2. Build Dataset & DataLoader
-    dataset = TextDataset.from_file(
-        data_path, tokenizer=tokenizer, seq_len=seq_len, stride=2
+    # 2. Build Dataset & DataLoader from the extracted in-memory corpus.
+    dataset = TextDataset.from_text(
+        training_text, tokenizer=tokenizer, seq_len=seq_len, stride=2
     )
     dataloader = create_dataloader(
         dataset, batch_size=batch_size, shuffle=True
@@ -224,4 +249,25 @@ def run_training(
 
 
 if __name__ == "__main__":
-    run_training()
+    parser = argparse.ArgumentParser(description="Train IntelliDesk's custom Transformer on local TXT/PDF data.")
+    parser.add_argument("--data", default="data/training.txt", help="TXT/PDF file or directory containing PDF/TXT files")
+    parser.add_argument("--output-dir", default="checkpoints", help="Directory for model, tokenizer, and extracted corpus")
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--seq-len", type=int, default=48)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--d-model", type=int, default=64)
+    parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--num-layers", type=int, default=3)
+    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    args = parser.parse_args()
+    run_training(
+        data_path=args.data,
+        output_dir=args.output_dir,
+        epochs=args.epochs,
+        seq_len=args.seq_len,
+        batch_size=args.batch_size,
+        d_model=args.d_model,
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
+        lr=args.learning_rate,
+    )
