@@ -1,8 +1,8 @@
 {
   "evaluation_version": 1,
   "seed": 1234,
-  "questions_file": "evaluation/questions.json",
-  "corpus_file": "data/training.txt",
+  "questions_file": "evaluation\\questions.json",
+  "corpus_file": "data\\training.txt",
   "retrieval_metrics": {
     "hit_at_3": 0.8,
     "mrr": 0.7,
@@ -33,7 +33,7 @@
           "score": 0.129417
         }
       ],
-      "generated_answer": " lasimodes G lin lar",
+      "generated_answer": " lasimodes G lin largne ve troularearies",
       "answer_keywords": [
         "causal",
         "future"
@@ -62,7 +62,7 @@
           "score": 0.11725
         }
       ],
-      "generated_answer": " d d acuches unee co",
+      "generated_answer": " d ales urioruce veee vechines ounectrar",
       "answer_keywords": [
         "offline",
         "document"
@@ -91,7 +91,7 @@
           "score": 0.07501
         }
       ],
-      "generated_answer": " ualy unt i-He Gre v",
+      "generated_answer": " uly ent 3. core chaneeeeeeasemonextratw",
       "answer_keywords": [
         "term",
         "frequency"
@@ -120,7 +120,7 @@
           "score": 0.173688
         }
       ],
-      "generated_answer": " ain lanetince Mul M",
+      "generated_answer": " lanetequlim Mulatine wincenceras oneret",
       "answer_keywords": [
         "embedding",
         "weights"
@@ -149,7 +149,7 @@
           "score": 0.094946
         }
       ],
-      "generated_answer": " Tore Trats cor ve v",
+      "generated_answer": " Torats The une Cos wins oke poranne Sig",
       "answer_keywords": [
         "local",
         "privacy"
