@@ -1,0 +1,120 @@
+{
+  "evaluation_version": 1,
+  "seed": 1234,
+  "questions_file": "evaluation/questions.json",
+  "corpus_file": "data/training.txt",
+  "retrieval_metrics": {
+    "hit_at_3": 0.8,
+    "mrr": 0.7,
+    "question_count": 5.0
+  },
+  "generation_metrics": {},
+  "interpretation_note": "Answer keyword coverage is a shallow diagnostic, not a factuality or semantic-quality metric. The supplied questions are a starter smoke-test set, not a held-out benchmark.",
+  "results": [
+    {
+      "id": "retrieval_01",
+      "question": "How does causal masking work in a decoder?",
+      "expected_passage_contains": "causal masking",
+      "retrieval_hit": true,
+      "matched_rank": 1,
+      "retrieved_passages": [
+        {
+          "text": "In a decoder-only Transformer, causal masking prevents tokens from attending to future positions during text generation.",
+          "score": 0.394374
+        },
+        {
+          "text": "Code: class CausalSelfAttention | Summary: Causal Multi-Head Self-Attention Layer for the Decoder-Only Transformer. Academic / Viva Reference: - What it does: Computes scaled dot-product attention across multiple representation subspaces simultaneously, enforcing autoregressive causality. - Why it is needed: 1. Self-Attention: Allows tokens to dynamically weigh the importance of other tokens in the context. 2. Multi-Head: Enables the model to jointly attend to information from different representation subspaces at different positions (e.g., syntactic vs. semantic relationships). 3. Causal Masking: Prevents current tokens from attending to subsequent tokens (future information), preserving",
+          "score": 0.180379
+        },
+        {
+          "text": "Code: class TransformerBlock | Summary: Transformer Decoder Block with Pre-Layer Normalization and Residual Connections. Academic / Viva Reference: - What it does: Chains Causal Multi-Head Self-Attention and Position-Wise Feed-Forward sublayers with Layer Normalization and Residual Connections. - Why it is needed: 1. Layer Stacking: Multiple identical blocks allow the model to build hierarchical semantic and syntactic representations of sequential context. 2. Residual Connections (Skip Connections): x_next = x + Sublayer(x). Provides an unbroken gradient highway directly through the network, preventing vanishing gradients in deep models. 3. Pre-LN vs Post-LN: - Post-LN: x = LayerNorm(x +",
+          "score": 0.129417
+        }
+      ]
+    },
+    {
+      "id": "retrieval_02",
+      "question": "What is an offline document assistant?",
+      "expected_passage_contains": "Offline document assistants",
+      "retrieval_hit": true,
+      "matched_rank": 2,
+      "retrieved_passages": [
+        {
+          "text": "Code: class DocumentRetriever | Summary: TF-IDF Document Retriever with Cosine Similarity for Offline RAG. Academic / Viva Reference: - What it does: Indexes unstructured document passages into sparse TF-IDF vectors and retrieves the most semantically relevant context chunks for an input query. - Why it is needed: 1. Non-Parametric Memory: Language models have fixed parametric weights; RAG dynamically supplies relevant up-to-date document knowledge without retraining. 2. Grounding & Anti-Hallucination: Conditioning generation on retrieved factual passages enforces factual accuracy. 3. Fully Offline & Fast: Uses pure vector-space mathematics (TF-IDF + Cosine Similarity) requiring zero",
+          "score": 0.295228
+        },
+        {
+          "text": "Offline document assistants operate locally without requiring cloud APIs or internet connectivity, ensuring data privacy.",
+          "score": 0.211153
+        },
+        {
+          "text": "Document understanding involves extracting meaningful information and insights from structured or unstructured text.",
+          "score": 0.11725
+        }
+      ]
+    },
+    {
+      "id": "retrieval_03",
+      "question": "How does TF-IDF retrieve relevant documents?",
+      "expected_passage_contains": "TF-IDF",
+      "retrieval_hit": true,
+      "matched_rank": 1,
+      "retrieved_passages": [
+        {
+          "text": "The retrieval component searches a document index using TF-IDF and cosine similarity to find relevant chunks.",
+          "score": 0.342384
+        },
+        {
+          "text": "Code: class DocumentRetriever | Summary: TF-IDF Document Retriever with Cosine Similarity for Offline RAG. Academic / Viva Reference: - What it does: Indexes unstructured document passages into sparse TF-IDF vectors and retrieves the most semantically relevant context chunks for an input query. - Why it is needed: 1. Non-Parametric Memory: Language models have fixed parametric weights; RAG dynamically supplies relevant up-to-date document knowledge without retraining. 2. Grounding & Anti-Hallucination: Conditioning generation on retrieved factual passages enforces factual accuracy. 3. Fully Offline & Fast: Uses pure vector-space mathematics (TF-IDF + Cosine Similarity) requiring zero",
+          "score": 0.34143
+        },
+        {
+          "text": "Fully Offline & Fast: Uses pure vector-space mathematics (TF-IDF + Cosine Similarity) requiring zero external vector databases, cloud APIs, or GPUs. - Mathematical Formulation: - Term Frequency: TF(t, d) = count(t, d) / len(d) - Inverse Document Frequency: IDF(t, D) = ln((1 + |D|) / (1 + DF(t))) + 1 - TF-IDF Weight: w(t, d) = TF(t, d) * IDF(t) - Cosine Similarity: sim(q, d) = (q . d) / (||q|| * ||d||)",
+          "score": 0.07501
+        }
+      ]
+    },
+    {
+      "id": "retrieval_04",
+      "question": "What is weight tying in a Transformer?",
+      "expected_passage_contains": "Weight tying",
+      "retrieval_hit": true,
+      "matched_rank": 1,
+      "retrieved_passages": [
+        {
+          "text": "Code: class TransformerLM | Summary: Full Decoder-Only Autoregressive Transformer Language Model. Academic / Viva Reference: - What it does: Stacks N Transformer Decoder Blocks on top of token and positional embeddings, followed by final layer normalization and an affine language model head that projects hidden states to vocabulary logits. - Why it is needed: 1. Generative Modeling: Models the joint probability of a sequence of tokens by decomposing it autoregressively: P(w_1, ..., w_T) = prod_{t=1}^T P(w_t | w_1, ..., w_{t-1}). 2. Weight Tying: Ties the weights of the input token embedding and the output LM head (Press & Wolf, 2017). This cuts parameters nearly in half and improves",
+          "score": 0.212227
+        },
+        {
+          "text": "In a decoder-only Transformer, causal masking prevents tokens from attending to future positions during text generation.",
+          "score": 0.18379
+        },
+        {
+          "text": "The Transformer is a deep learning architecture that relies on self-attention mechanisms to process sequential data.",
+          "score": 0.173688
+        }
+      ]
+    },
+    {
+      "id": "retrieval_05",
+      "question": "Why is a local assistant privacy-friendly?",
+      "expected_passage_contains": "privacy",
+      "retrieval_hit": false,
+      "matched_rank": null,
+      "retrieved_passages": [
+        {
+          "text": "The Transformer is a deep learning architecture that relies on self-attention mechanisms to process sequential data.",
+          "score": 0.157031
+        },
+        {
+          "text": "Code: class FeedForward | Summary: Position-Wise Feed-Forward Network (FFN) for the Transformer Block. Academic / Viva Reference: - What it does: Applies two linear transformations with a non-linear activation in between, applied identically and independently to each token position. - Why it is needed: 1. Attention mechanisms perform dynamic linear aggregation across positions; the FFN supplies the deep non-linear expressive capacity. 2. Attention mixes representations across tokens, whereas the FFN processes intra-token feature interactions and functions as an associative memory store. 3. Expands the model dimensionality into a higher-dimensional space (typically 4 * d_model), allowing",
+          "score": 0.118224
+        },
+        {
+          "text": "Code: class TextDataset | Summary: Sliding-Window Autoregressive Next-Token Dataset for Language Modeling. Academic / Viva Reference: - What it does: Converts a continuous stream of token IDs into paired input-target sequences (x, y) where y is identical to x shifted by 1 position forward in time. - Why it is needed: 1. Self-Supervised Learning: Eliminates the need for manually labeled data by using the natural order of human text as the supervision signal. 2. Causal Alignment: Input x: [t_0, t_1, ..., t_{S-1}] Target y: [t_1, t_2, ..., t_S ] At every index i, the model attempts to predict y[i] given context x[0:i+1]. 3. Sliding Window: Using an overlapping stride extracts maximal training",
+          "score": 0.094946
+        }
+      ]
+    }
+  ]
+}

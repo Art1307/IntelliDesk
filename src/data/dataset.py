@@ -45,6 +45,18 @@ class TextDataset(Dataset):
         self.num_samples = (len(self.tokens) - self.seq_len) // self.stride
 
     @classmethod
+    def from_text(
+        cls,
+        text: str,
+        tokenizer: Tokenizer,
+        seq_len: int = 64,
+        stride: int | None = None,
+    ) -> "TextDataset":
+        """Tokenize an in-memory text corpus and create next-token examples."""
+        tokens = tokenizer.encode(text)
+        return cls(tokens=tokens, seq_len=seq_len, stride=stride)
+
+    @classmethod
     def from_file(
         cls,
         filepath: str | Path,
@@ -55,8 +67,7 @@ class TextDataset(Dataset):
         """Load text from file, tokenize, and create TextDataset."""
         with open(filepath, "r", encoding="utf-8") as f:
             text = f.read()
-        tokens = tokenizer.encode(text)
-        return cls(tokens=tokens, seq_len=seq_len, stride=stride)
+        return cls.from_text(text, tokenizer=tokenizer, seq_len=seq_len, stride=stride)
 
     def __len__(self) -> int:
         return self.num_samples
