@@ -1,3 +1,8 @@
-﻿torch>=2.0.0
+﻿
+torch>=2.0.0
 numpy
 pytest
+pypdf
+fastapi
+uvicorn
+python-multipart

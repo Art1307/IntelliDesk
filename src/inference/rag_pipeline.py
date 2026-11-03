@@ -11,17 +11,21 @@ from src.inference.retriever import DocumentRetriever
 
 
 class RAGPipeline:
-    """
-    Retrieval-Augmented Generation pipeline for IntelliDesk.
+    """Offline RAG pipeline for IntelliDesk."""
 
-    Combines offline TF-IDF retrieval with a decoder-only Transformer.
+    STOP_WORDS = {
+        "what", "is", "are", "was", "were", "who",
+        "when", "where", "why", "how", "the", "a",
+        "an", "in", "on", "of", "to", "and", "does",
+        "do", "did", "for", "with", "which", "that",
+        "tell", "me", "about", "explain", "define",
+        "can", "could", "would", "should", "by",
+        "using", "according", "based", "example"
+    }
 
-    Pipeline:
-    1. Retrieve relevant document passages.
-    2. Fit complete sentences into the model's context window.
-    3. Append the user query and answer marker.
-    4. Generate text using the Transformer.
-    """
+    NO_ANSWER = (
+        "I couldn't find a relevant answer in the provided documents."
+    )
 
     def __init__(
         self,
@@ -42,7 +46,7 @@ class RAGPipeline:
         data_path: str | Path | None = "data/training.txt",
         device: str = "cpu",
     ) -> "RAGPipeline":
-        """Load a model, matching tokenizer, and document retriever."""
+
         model_path = Path(model_path)
         tokenizer_path = Path(tokenizer_path)
 
@@ -58,10 +62,13 @@ class RAGPipeline:
 
         tokenizer = Tokenizer.load(tokenizer_path)
 
-        checkpoint = torch.load(model_path, map_location=device)
-        model_config = checkpoint["model_config"]
+        checkpoint = torch.load(
+            model_path,
+            map_location=device,
+            weights_only=False,
+        )
 
-        model = TransformerLM(**model_config)
+        model = TransformerLM(**checkpoint["model_config"])
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
         model.eval()
@@ -71,41 +78,190 @@ class RAGPipeline:
         if data_path:
             source_path = Path(data_path)
 
-            if source_path.exists():
-                if (
-                    source_path.is_dir()
-                    or source_path.suffix.lower() in {".pdf", ".txt"}
-                ):
-                    retriever = DocumentRetriever.from_paths(
-                        [source_path]
-                    )
-                else:
-                    raise ValueError(
-                        "Unsupported retrieval source: "
-                        f"{source_path}. Provide a PDF, TXT file, "
-                        "or directory."
-                    )
+            if not source_path.exists():
+                raise FileNotFoundError(
+                    f"Document source not found: {source_path}"
+                )
 
-        return cls(
-            model=model,
-            tokenizer=tokenizer,
-            retriever=retriever,
-        )
+            if (
+                source_path.is_dir()
+                or source_path.suffix.lower() in {".pdf", ".txt"}
+            ):
+                retriever = DocumentRetriever.from_paths(
+                    [source_path]
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported retrieval source: {source_path}"
+                )
+
+        return cls(model, tokenizer, retriever)
 
     def retrieve_context(
         self,
         query: str,
         top_k: int = 2,
     ) -> list[tuple[str, float]]:
-        """Retrieve the top-k passages for a query."""
+
         return self.retriever.retrieve(query, top_k=top_k)
+
+    def _get_query_words(self, query: str) -> set[str]:
+
+        return {
+            word.lower()
+            for word in re.findall(r"[a-zA-Z0-9]+", query)
+            if word.lower() not in self.STOP_WORDS
+        }
+
+    def _is_relevant_passage(
+        self,
+        query: str,
+        passage: str,
+        score: float,
+    ) -> bool:
+
+        if not passage.strip() or score <= 0:
+            return False
+
+        query_words = self._get_query_words(query)
+
+        passage_words = {
+            word.lower()
+            for word in re.findall(r"[a-zA-Z0-9]+", passage)
+        }
+
+        return bool(query_words & passage_words)
+
+    def _split_sentences(self, passage: str) -> list[str]:
+
+        parts = re.split(
+            r"(?<=[.!?])\s+|[•▪◊‡]\s*|\n+",
+            passage
+        )
+
+        return [
+            part.strip(" \t\r\n-–—")
+            for part in parts
+            if part.strip(" \t\r\n-–—")
+        ]
+
+    def _is_question_sentence(self, sentence: str) -> bool:
+        """Reject questions and question-like fragments."""
+
+        cleaned = sentence.strip()
+
+        if "?" in cleaned:
+            return True
+
+        question_start = re.match(
+            r"^(problem\s*[-:]\s*)?"
+            r"(what|which|who|when|where|why|how|"
+            r"does|do|did|is|are|was|were|can|could)\b",
+            cleaned,
+            re.IGNORECASE,
+        )
+
+        return question_start is not None
+
+    def _sentence_score(
+        self,
+        query_words: set[str],
+        sentence: str,
+    ) -> float:
+
+        if self._is_question_sentence(sentence):
+            return 0.0
+
+        sentence_words = {
+            word.lower()
+            for word in re.findall(r"[a-zA-Z0-9]+", sentence)
+        }
+
+        if not sentence_words:
+            return 0.0
+
+        matched_words = query_words & sentence_words
+
+        if not matched_words:
+            return 0.0
+
+        coverage = len(matched_words) / len(query_words)
+
+        length_penalty = min(len(sentence_words), 40) / 40
+
+        return (
+            len(matched_words)
+            + coverage
+            - (0.15 * length_penalty)
+        )
+
+    def extract_answer(
+        self,
+        query: str,
+        passage: str,
+    ) -> str:
+
+        if not passage.strip():
+            return self.NO_ANSWER
+
+        query_words = self._get_query_words(query)
+
+        if not query_words:
+            return self.NO_ANSWER
+
+        best_sentence = ""
+        best_score = 0.0
+
+        for sentence in self._split_sentences(passage):
+
+            score = self._sentence_score(
+                query_words,
+                sentence,
+            )
+
+            if score > best_score:
+                best_score = score
+                best_sentence = sentence
+
+        return best_sentence if best_sentence else self.NO_ANSWER
+
+    def _select_best_answer(
+        self,
+        query: str,
+        relevant_sources: list[dict[str, Any]],
+    ) -> tuple[str, dict[str, Any] | None]:
+
+        query_words = self._get_query_words(query)
+
+        best_answer = self.NO_ANSWER
+        best_metadata = None
+        best_score = 0.0
+
+        for item in relevant_sources:
+
+            passage = str(item.get("text", ""))
+            metadata = item.get("metadata", {})
+
+            for sentence in self._split_sentences(passage):
+
+                score = self._sentence_score(
+                    query_words,
+                    sentence,
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_answer = sentence
+                    best_metadata = metadata
+
+        return best_answer, best_metadata
 
     def format_prompt(
         self,
         query: str,
         retrieved_passages: list[tuple[str, float]],
     ) -> str:
-        """Format retrieved passages, query, and answer marker."""
+
         if not retrieved_passages:
             return f"Query: {query}\nAnswer:"
 
@@ -117,41 +273,43 @@ class RAGPipeline:
 
         return f"Context: {context}\nQuery: {query}\nAnswer:"
 
-    
     def _fit_prompt_to_context(
         self,
         query: str,
         retrieved_passages: list[tuple[str, float]],
     ) -> str:
-        """Fit whole retrieved passages and the query into the context window."""
+
         max_tokens = int(self.model.max_seq_len)
         prefix = "Context: "
         suffix = f"\nQuery: {query}\nAnswer:"
 
         def token_count(text: str) -> int:
             return len(
-                self.tokenizer.encode(text, add_special_tokens=False)
+                self.tokenizer.encode(
+                    text,
+                    add_special_tokens=False,
+                )
             )
 
-        # Preserve the query and answer marker even if no context fits.
         if token_count(suffix) >= max_tokens:
             return self.tokenizer.decode(
                 self.tokenizer.encode(
-                    suffix, add_special_tokens=False
+                    suffix,
+                    add_special_tokens=False,
                 )[-max_tokens:]
             )
 
         selected = []
 
-        # Passages are already ranked by relevance. Keep them in that order.
         for passage, _score in retrieved_passages:
+
             passage = passage.strip()
+
             if not passage:
                 continue
 
             candidate = selected + [passage]
-            context = " ".join(candidate)
-            prompt = f"{prefix}{context}{suffix}"
+            prompt = f"{prefix}{' '.join(candidate)}{suffix}"
 
             if token_count(prompt) <= max_tokens:
                 selected.append(passage)
@@ -162,7 +320,9 @@ class RAGPipeline:
         prompt = f"{prefix}{' '.join(selected)}{suffix}"
 
         if token_count(prompt) > max_tokens:
-            raise RuntimeError("Prompt exceeds model context length.")
+            raise RuntimeError(
+                "Prompt exceeds model context length."
+            )
 
         return prompt
 
@@ -175,12 +335,7 @@ class RAGPipeline:
         temperature: float = 0.7,
         top_k_sampling: int | None = None,
     ) -> dict[str, Any]:
-        """
-        Retrieve context and generate an answer.
 
-        Returns the query, retrieved passages, formatted prompt,
-        generated answer, and full decoded output.
-        """
         if not query.strip():
             raise ValueError("Query cannot be empty.")
 
@@ -190,17 +345,56 @@ class RAGPipeline:
         if max_new_tokens < 1:
             raise ValueError("max_new_tokens must be at least 1.")
 
+        # Step 1: Retrieve passages.
         retrieved_sources = self.retriever.retrieve_with_metadata(
             query,
             top_k=top_k,
         )
 
-        passages = [
-            (str(item["text"]), float(item["score"]))
+        # Step 2: Filter relevant passages.
+        relevant_sources = [
+            item
             for item in retrieved_sources
+            if self._is_relevant_passage(
+                query,
+                str(item["text"]),
+                float(item["score"]),
+            )
         ]
 
-        prompt = self._fit_prompt_to_context(query, passages)
+        passages = [
+            (str(item["text"]), float(item["score"]))
+            for item in relevant_sources
+        ]
+
+        # Step 3: Handle missing answers.
+        if not relevant_sources:
+            return {
+                "query": query,
+                "answer": self.NO_ANSWER,
+                "answer_source": None,
+                "retrieved_passages": [],
+                "retrieved_sources": [],
+                "prompt": f"Query: {query}\nAnswer:",
+                "prompt_token_count": 0,
+                "max_context_tokens": self.model.max_seq_len,
+                "generated_text": (
+                    "Not generated because no relevant context was found."
+                ),
+                "full_output": "",
+            }
+
+        # Step 4: Select the best answer from all passages.
+        answer, answer_source = self._select_best_answer(
+            query,
+            relevant_sources,
+        )
+
+        # Step 5: Prepare the Transformer prompt.
+        prompt = self._fit_prompt_to_context(
+            query,
+            passages,
+        )
 
         encoded_tokens = self.tokenizer.encode(
             prompt,
@@ -209,8 +403,7 @@ class RAGPipeline:
 
         if len(encoded_tokens) > self.model.max_seq_len:
             raise RuntimeError(
-                "Prompt exceeds the model's context window: "
-                f"{len(encoded_tokens)} > {self.model.max_seq_len}"
+                "Prompt exceeds model context window."
             )
 
         device = next(self.model.parameters()).device
@@ -221,6 +414,7 @@ class RAGPipeline:
             device=device,
         )
 
+        # Step 6: Experimental text generation.
         generated_ids = self.model.generate(
             input_ids,
             max_new_tokens=max_new_tokens,
@@ -229,6 +423,7 @@ class RAGPipeline:
         )
 
         prompt_len = input_ids.shape[1]
+
         new_token_ids = generated_ids[0, prompt_len:].tolist()
 
         generated_text = self.tokenizer.decode(
@@ -236,10 +431,13 @@ class RAGPipeline:
             skip_special_tokens=True,
         )
 
+        # Step 7: Return results.
         return {
             "query": query,
+            "answer": answer,
+            "answer_source": answer_source,
             "retrieved_passages": passages,
-            "retrieved_sources": retrieved_sources,
+            "retrieved_sources": relevant_sources,
             "prompt": prompt,
             "prompt_token_count": len(encoded_tokens),
             "max_context_tokens": self.model.max_seq_len,
@@ -262,37 +460,36 @@ if __name__ == "__main__":
         "--query",
         type=str,
         default="What is an offline document assistant?",
-        help="User query",
     )
+
     parser.add_argument(
         "--model",
         type=str,
         default="checkpoints/model.pt",
-        help="Model checkpoint path",
     )
+
     parser.add_argument(
         "--tokenizer",
         type=str,
         default="checkpoints/tokenizer.json",
-        help="Tokenizer path",
     )
+
     parser.add_argument(
         "--data",
         type=str,
         default="data/training.txt",
-        help="Document corpus path",
     )
+
     parser.add_argument(
         "--top_k",
         type=int,
         default=2,
-        help="Number of retrieved passages",
     )
+
     parser.add_argument(
         "--max_new_tokens",
         type=int,
         default=60,
-        help="Maximum number of generated tokens",
     )
 
     args = parser.parse_args()
@@ -311,15 +508,17 @@ if __name__ == "__main__":
 
     print("\n--- INTELLIDESK RAG RESULT ---")
     print(f"Query: {result['query']}")
-    print(
-        f"Context tokens: {result['prompt_token_count']}/"
-        f"{result['max_context_tokens']}"
-    )
 
-    print(
-        f"\nRetrieved Passages "
-        f"({len(result['retrieved_passages'])}):"
-    )
+    print("\nExtractive Answer:")
+    print(result["answer"])
+
+    print("\nAnswer Source:")
+    print(result["answer_source"])
+
+    print("\nGenerated Answer (Experimental):")
+    print(result["generated_text"])
+
+    print("\nRetrieved Passages:")
 
     for index, (passage, score) in enumerate(
         result["retrieved_passages"],
@@ -327,9 +526,3 @@ if __name__ == "__main__":
     ):
         print(f"\n[{index}] Score: {score:.4f}")
         print(passage)
-
-    print("\nFormatted Prompt:")
-    print(result["prompt"])
-
-    print("\nGenerated Answer:")
-    print(result["generated_text"])
