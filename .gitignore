@@ -27,3 +27,7 @@ Thumbs.db
 intellidesk.txt
 *.key
 *.pem
+
+# Local backups and uploaded documents
+backups/
+data/uploads/
