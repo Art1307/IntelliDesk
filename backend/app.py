@@ -21,8 +21,19 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 
-MODEL_PATH = ROOT_DIR / "checkpoints" / "model.pt"
-TOKENIZER_PATH = ROOT_DIR / "checkpoints" / "tokenizer.json"
+MODEL_PATH = (
+    ROOT_DIR
+    / "checkpoints"
+    / "context256_v2"
+    / "model.pt"
+)
+
+TOKENIZER_PATH = (
+    ROOT_DIR
+    / "checkpoints"
+    / "context256_v2"
+    / "tokenizer.json"
+)
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 

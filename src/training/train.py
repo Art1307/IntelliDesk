@@ -1,13 +1,20 @@
+
 import argparse
 import os
 from pathlib import Path
+
 import torch
 from torch.utils.data import DataLoader
+
 from src.model.transformer import TransformerLM
 from src.data.tokenizer import Tokenizer
 from src.data.dataset import TextDataset, create_dataloader
 from src.data.document_loader import load_documents
 
+
+# ============================================================
+# 1. OPTIMIZER
+# ============================================================
 
 def configure_optimizers(
     model: TransformerLM,
@@ -15,23 +22,15 @@ def configure_optimizers(
     lr: float = 3e-4,
     betas: tuple[float, float] = (0.9, 0.95),
 ) -> torch.optim.AdamW:
-    """
-    Configure AdamW optimizer with decoupled weight decay parameter grouping.
+    """Configure AdamW with appropriate weight-decay groups."""
 
-    Academic / Viva Reference:
-    - Weight Decay Parameter Grouping (Karpathy / GPT-2 style):
-      1. Decay applied to weights (dim >= 2: linear layers, embedding matrices).
-      2. No decay applied to 1D vectors (biases, LayerNorm scale/shift gamma/beta).
-    - Why AdamW: Decouples weight decay from gradient updates, preserving adaptive learning rates
-      for individual features while effectively regularizing weights.
-    """
     decay_params = []
     no_decay_params = []
 
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        # Biases and 1D parameters (LayerNorm weight and bias) should not be decayed
+
         if param.dim() >= 2:
             decay_params.append(param)
         else:
@@ -42,19 +41,19 @@ def configure_optimizers(
         {"params": no_decay_params, "weight_decay": 0.0},
     ]
 
-    return torch.optim.AdamW(optim_groups, lr=lr, betas=betas)
+    return torch.optim.AdamW(
+        optim_groups,
+        lr=lr,
+        betas=betas,
+    )
 
+
+# ============================================================
+# 2. TRAINER
+# ============================================================
 
 class Trainer:
-    """
-    Training manager for the Transformer Language Model.
-
-    Academic / Viva Reference:
-    - What it does: Coordinates forward pass, loss calculation, backward propagation,
-      gradient clipping, parameter updates, and checkpoint management.
-    - Gradient Clipping: Scales the gradient vector if its Euclidean norm exceeds max_norm,
-      preventing catastrophic divergence (exploding gradients) during training.
-    """
+    """Training manager for the custom TransformerLM."""
 
     def __init__(
         self,
@@ -69,30 +68,62 @@ class Trainer:
         self.grad_clip = grad_clip
 
     def train_epoch(self, dataloader: DataLoader) -> float:
-        """Execute one complete training epoch."""
+        """Train for one complete epoch."""
+
         self.model.train()
+
         total_loss = 0.0
         num_batches = 0
 
         for batch_x, batch_y in dataloader:
+
             batch_x = batch_x.to(self.device)
             batch_y = batch_y.to(self.device)
 
             self.optimizer.zero_grad(set_to_none=True)
 
-            _, loss = self.model(batch_x, targets=batch_y)
+            _, loss = self.model(
+                batch_x,
+                targets=batch_y,
+            )
+
             loss.backward()
 
-            # Gradient clipping to prevent exploding gradients
             if self.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.grad_clip
+                    self.model.parameters(),
+                    self.grad_clip,
                 )
 
             self.optimizer.step()
 
             total_loss += loss.item()
             num_batches += 1
+
+        return total_loss / max(num_batches, 1)
+
+    def evaluate(self, dataloader: DataLoader) -> float:
+        """Calculate average loss without updating model weights."""
+
+        self.model.eval()
+
+        total_loss = 0.0
+        num_batches = 0
+
+        with torch.no_grad():
+
+            for batch_x, batch_y in dataloader:
+
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
+
+                _, loss = self.model(
+                    batch_x,
+                    targets=batch_y,
+                )
+
+                total_loss += loss.item()
+                num_batches += 1
 
         return total_loss / max(num_batches, 1)
 
@@ -103,30 +134,25 @@ class Trainer:
         checkpoint_dir: str | Path | None = None,
         verbose: bool = True,
     ) -> list[float]:
-        """
-        Train the model over a specified number of epochs.
 
-        Args:
-            dataloader: DataLoader with training minibatches.
-            epochs: Total epochs to train.
-            checkpoint_dir: Directory to save checkpoints.
-            verbose: If True, prints epoch loss.
-
-        Returns:
-            List of average loss values per epoch.
-        """
         loss_history = []
+
         if checkpoint_dir:
             os.makedirs(checkpoint_dir, exist_ok=True)
 
         for epoch in range(1, epochs + 1):
+
             epoch_loss = self.train_epoch(dataloader)
             loss_history.append(epoch_loss)
 
-            if verbose and (epoch % max(1, epochs // 10) == 0 or epoch == 1 or epoch == epochs):
-                print(f"Epoch {epoch:3d}/{epochs:3d} | Train Loss: {epoch_loss:.4f}")
+            if verbose:
+                print(
+                    f"Epoch {epoch:3d}/{epochs:3d} "
+                    f"| Train Loss: {epoch_loss:.4f}"
+                )
 
-        if checkpoint_dir:
+        if checkpoint_dir and loss_history:
+
             self.save_checkpoint(
                 Path(checkpoint_dir) / "model.pt",
                 epoch=epochs,
@@ -136,9 +162,13 @@ class Trainer:
         return loss_history
 
     def save_checkpoint(
-        self, filepath: str | Path, epoch: int, loss: float
+        self,
+        filepath: str | Path,
+        epoch: int,
+        loss: float,
     ) -> None:
-        """Persist model parameters and training state."""
+        """Save model weights and optimizer state."""
+
         checkpoint = {
             "epoch": epoch,
             "loss": loss,
@@ -153,6 +183,7 @@ class Trainer:
                 "tie_weights": self.model.tie_weights,
             },
         }
+
         torch.save(checkpoint, filepath)
 
     @classmethod
@@ -163,34 +194,72 @@ class Trainer:
         optimizer: torch.optim.Optimizer | None = None,
         device: str = "cpu",
     ) -> dict:
-        """Restore model parameters from checkpoint."""
-        checkpoint = torch.load(filepath, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        """Restore model and optionally optimizer state."""
+
+        checkpoint = torch.load(
+            filepath,
+            map_location=device,
+            weights_only=False,
+        )
+
+        model.load_state_dict(
+            checkpoint["model_state_dict"]
+        )
+
         if optimizer and "optimizer_state_dict" in checkpoint:
-            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            optimizer.load_state_dict(
+                checkpoint["optimizer_state_dict"]
+            )
+
         return checkpoint
 
 
+# ============================================================
+# 3. LOAD TRAINING TEXT
+# ============================================================
+
 def load_training_text(data_path: str | Path) -> str:
-    """Read a TXT corpus or extract text from a PDF/directory of PDF and TXT files."""
+    """Load text from TXT, PDF, or a directory."""
+
     source = Path(data_path).expanduser()
+
     if not source.exists():
-        raise FileNotFoundError(f"Training input not found: {source}")
+        raise FileNotFoundError(
+            f"Training input not found: {source}"
+        )
 
     if source.is_dir() or source.suffix.lower() == ".pdf":
+
         chunks = load_documents([source])
-        text = "\n".join(chunk.text for chunk in chunks)
+
+        text = "\n".join(
+            chunk.text for chunk in chunks
+        )
+
     elif source.suffix.lower() == ".txt":
-        text = source.read_text(encoding="utf-8-sig", errors="replace")
+
+        text = source.read_text(
+            encoding="utf-8-sig",
+            errors="replace",
+        )
+
     else:
         raise ValueError(
-            f"Unsupported training input '{source}'. Provide a .txt file, .pdf file, or directory of PDF/TXT files."
+            "Provide a TXT file, PDF file, or directory "
+            "containing PDF/TXT files."
         )
 
     if not text.strip():
-        raise ValueError(f"No training text could be extracted from {source}")
+        raise ValueError(
+            f"No training text could be extracted from {source}"
+        )
+
     return text
 
+
+# ============================================================
+# 4. ORIGINAL TRAINING FROM SCRATCH
+# ============================================================
 
 def run_training(
     data_path: str = "data/training.txt",
@@ -203,25 +272,38 @@ def run_training(
     num_layers: int = 3,
     lr: float = 1e-3,
 ) -> tuple[TransformerLM, Tokenizer]:
-    """Train language model end-to-end on data corpus and save artifacts."""
+
+    """Train a new TransformerLM from scratch."""
+
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # 1. Extract local text from the supplied TXT/PDF source(s), then build the tokenizer.
     training_text = load_training_text(data_path)
-    (output_path / "training_corpus.txt").write_text(training_text, encoding="utf-8")
+
     tokenizer = Tokenizer.from_text(training_text)
-    tokenizer.save(output_path / "tokenizer.json")
 
-    # 2. Build Dataset & DataLoader from the extracted in-memory corpus.
+    tokenizer.save(
+        output_path / "tokenizer.json"
+    )
+
+    (output_path / "training_corpus.txt").write_text(
+        training_text,
+        encoding="utf-8",
+    )
+
     dataset = TextDataset.from_text(
-        training_text, tokenizer=tokenizer, seq_len=seq_len, stride=2
-    )
-    dataloader = create_dataloader(
-        dataset, batch_size=batch_size, shuffle=True
+        training_text,
+        tokenizer=tokenizer,
+        seq_len=seq_len,
+        stride=2,
     )
 
-    # 3. Instantiate TransformerLM
+    dataloader = create_dataloader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+
     model = TransformerLM(
         vocab_size=tokenizer.vocab_size,
         d_model=d_model,
@@ -232,12 +314,22 @@ def run_training(
         tie_weights=True,
     )
 
-    # 4. Optimizer and Trainer
-    optimizer = configure_optimizers(model, lr=lr)
-    trainer = Trainer(model=model, optimizer=optimizer)
+    optimizer = configure_optimizers(
+        model,
+        lr=lr,
+    )
 
-    # 5. Train
-    print(f"Beginning training on {data_path} ({len(dataset)} samples)...")
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        device="cpu",
+    )
+
+    print(
+        f"Beginning training on {data_path} "
+        f"({len(dataset)} samples)"
+    )
+
     trainer.train(
         dataloader=dataloader,
         epochs=epochs,
@@ -248,26 +340,351 @@ def run_training(
     return model, tokenizer
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train IntelliDesk's custom Transformer on local TXT/PDF data.")
-    parser.add_argument("--data", default="data/training.txt", help="TXT/PDF file or directory containing PDF/TXT files")
-    parser.add_argument("--output-dir", default="checkpoints", help="Directory for model, tokenizer, and extracted corpus")
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--seq-len", type=int, default=48)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--d-model", type=int, default=64)
-    parser.add_argument("--num-heads", type=int, default=4)
-    parser.add_argument("--num-layers", type=int, default=3)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
-    args = parser.parse_args()
-    run_training(
-        data_path=args.data,
-        output_dir=args.output_dir,
-        epochs=args.epochs,
-        seq_len=args.seq_len,
-        batch_size=args.batch_size,
-        d_model=args.d_model,
-        num_heads=args.num_heads,
-        num_layers=args.num_layers,
-        lr=args.learning_rate,
+# ============================================================
+# 5. CONTEXT256 FINE-TUNING
+# ============================================================
+
+def fine_tune_context256(
+    data_path: str = "data/training_v2.txt",
+    checkpoint_path: str = "checkpoints/context256/model.pt",
+    tokenizer_path: str = "checkpoints/context256/tokenizer.json",
+    output_dir: str = "checkpoints/context256_v2",
+    epochs: int = 5,
+    seq_len: int = 240,
+    batch_size: int = 4,
+    learning_rate: float = 1e-4,
+):
+    """Continue training Context256 with validation."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # --------------------------------------------------------
+    # A. Load existing tokenizer
+    # --------------------------------------------------------
+
+    tokenizer = Tokenizer.load(tokenizer_path)
+
+    training_text = load_training_text(data_path)
+
+    unsupported = (
+        set(training_text) -
+        set(tokenizer.char_to_id)
     )
+
+    if unsupported:
+        raise ValueError(
+            f"Unsupported tokenizer characters: {sorted(unsupported)}"
+        )
+
+    # --------------------------------------------------------
+    # B. Sequential training/validation split
+    # --------------------------------------------------------
+
+    split_index = int(len(training_text) * 0.90)
+
+    train_text = training_text[:split_index]
+
+    val_text = training_text[split_index:]
+
+    train_dataset = TextDataset.from_text(
+        train_text,
+        tokenizer=tokenizer,
+        seq_len=seq_len,
+        stride=8,
+    )
+
+    val_dataset = TextDataset.from_text(
+        val_text,
+        tokenizer=tokenizer,
+        seq_len=seq_len,
+        stride=8,
+    )
+
+    if len(train_dataset) == 0 or len(val_dataset) == 0:
+        raise ValueError(
+            "Training or validation dataset is too small."
+        )
+
+    train_loader = create_dataloader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+
+    val_loader = create_dataloader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    # --------------------------------------------------------
+    # C. Load existing Context256 checkpoint
+    # --------------------------------------------------------
+
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
+    )
+
+    config = checkpoint["model_config"]
+
+    if seq_len + 16 != config["max_seq_len"]:
+        raise ValueError(
+            "Sequence length does not match checkpoint context length."
+        )
+
+    if tokenizer.vocab_size != config["vocab_size"]:
+        raise ValueError(
+            "Tokenizer vocabulary does not match checkpoint."
+        )
+
+    model = TransformerLM(
+        vocab_size=config["vocab_size"],
+        d_model=config["d_model"],
+        num_heads=config["num_heads"],
+        num_layers=config["num_layers"],
+        max_seq_len=config["max_seq_len"],
+        tie_weights=config["tie_weights"],
+    )
+
+    model.load_state_dict(
+        checkpoint["model_state_dict"]
+    )
+
+    # --------------------------------------------------------
+    # D. Create fresh optimizer
+    # --------------------------------------------------------
+
+    optimizer = configure_optimizers(
+        model,
+        lr=learning_rate,
+    )
+
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        device="cpu",
+    )
+
+    # --------------------------------------------------------
+    # E. Save separate tokenizer and corpus
+    # --------------------------------------------------------
+
+    tokenizer.save(
+        output_path / "tokenizer.json"
+    )
+
+    (output_path / "training_corpus.txt").write_text(
+        training_text,
+        encoding="utf-8",
+    )
+
+    # --------------------------------------------------------
+    # F. Fine-tuning with validation
+    # --------------------------------------------------------
+
+    best_val_loss = float("inf")
+
+    print("\n========== CONTEXT256 FINE-TUNING ==========")
+    print(f"Training samples: {len(train_dataset)}")
+    print(f"Validation samples: {len(val_dataset)}")
+    print(f"Starting checkpoint epoch: {checkpoint['epoch']}")
+    print(f"Learning rate: {learning_rate}")
+    print(f"Device: CPU")
+    print("============================================\n")
+
+    for epoch in range(1, epochs + 1):
+
+        train_loss = trainer.train_epoch(
+            train_loader
+        )
+
+        val_loss = trainer.evaluate(
+            val_loader
+        )
+
+        print(
+            f"Epoch {epoch}/{epochs} "
+            f"| Train Loss: {train_loss:.4f} "
+            f"| Validation Loss: {val_loss:.4f}"
+        )
+
+        # Save only the best validation checkpoint
+        if val_loss < best_val_loss:
+
+            best_val_loss = val_loss
+
+            trainer.save_checkpoint(
+                output_path / "model.pt",
+                epoch=epoch,
+                loss=val_loss,
+            )
+
+            print(
+                "Best validation checkpoint saved."
+            )
+
+    print("\n========== TRAINING COMPLETE ==========")
+    print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Saved model: {output_path / 'model.pt'}")
+    print("========================================\n")
+
+    return trainer.model, tokenizer
+
+
+# ============================================================
+# 6. COMMAND LINE INTERFACE
+# ============================================================
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        description="Train IntelliDesk TransformerLM offline."
+    )
+
+    subparsers = parser.add_subparsers(
+        dest="command"
+    )
+
+    # Original training command
+    train_parser = subparsers.add_parser(
+        "train",
+        help="Train a new model from scratch.",
+    )
+
+    train_parser.add_argument(
+        "--data",
+        default="data/training.txt",
+    )
+
+    train_parser.add_argument(
+        "--output-dir",
+        default="checkpoints",
+    )
+
+    train_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=50,
+    )
+
+    train_parser.add_argument(
+        "--seq-len",
+        type=int,
+        default=48,
+    )
+
+    train_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+    )
+
+    train_parser.add_argument(
+        "--d-model",
+        type=int,
+        default=64,
+    )
+
+    train_parser.add_argument(
+        "--num-heads",
+        type=int,
+        default=4,
+    )
+
+    train_parser.add_argument(
+        "--num-layers",
+        type=int,
+        default=3,
+    )
+
+    train_parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=1e-3,
+    )
+
+    # Context256 fine-tuning command
+    fine_parser = subparsers.add_parser(
+        "fine-tune",
+        help="Fine-tune the existing Context256 checkpoint.",
+    )
+
+    fine_parser.add_argument(
+        "--data",
+        default="data/training_v2.txt",
+    )
+
+    fine_parser.add_argument(
+        "--checkpoint",
+        default="checkpoints/context256/model.pt",
+    )
+
+    fine_parser.add_argument(
+        "--tokenizer",
+        default="checkpoints/context256/tokenizer.json",
+    )
+
+    fine_parser.add_argument(
+        "--output-dir",
+        default="checkpoints/context256_v2",
+    )
+
+    fine_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+    )
+
+    fine_parser.add_argument(
+        "--seq-len",
+        type=int,
+        default=240,
+    )
+
+    fine_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+    )
+
+    fine_parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=1e-4,
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "train":
+
+        run_training(
+            data_path=args.data,
+            output_dir=args.output_dir,
+            epochs=args.epochs,
+            seq_len=args.seq_len,
+            batch_size=args.batch_size,
+            d_model=args.d_model,
+            num_heads=args.num_heads,
+            num_layers=args.num_layers,
+            lr=args.learning_rate,
+        )
+
+    elif args.command == "fine-tune":
+
+        fine_tune_context256(
+            data_path=args.data,
+            checkpoint_path=args.checkpoint,
+            tokenizer_path=args.tokenizer,
+            output_dir=args.output_dir,
+            epochs=args.epochs,
+            seq_len=args.seq_len,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+        )
+
+    else:
+
+        parser.print_help()
